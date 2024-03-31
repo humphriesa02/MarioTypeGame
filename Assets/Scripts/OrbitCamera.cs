@@ -59,6 +59,12 @@ public class OrbitCamera : MonoBehaviour
 			return halfExtends;
 		}
 	}
+	
+	// Keeping track of orbit rotation - orbit angle rotation
+	Quaternion orbitRotation;
+
+	// We will apply a second rotation to align the orbit rotation with gravity
+	Quaternion gravityAlignment = Quaternion.identity;
 
 	private void OnValidate()
 	{
@@ -74,23 +80,26 @@ public class OrbitCamera : MonoBehaviour
 		regularCamera = GetComponent<Camera>();
 		focusPoint = focus.position;
 		Cursor.lockState = CursorLockMode.Locked;
-		transform.localRotation = Quaternion.Euler(orbitAngles);
+		transform.localRotation = orbitRotation =  Quaternion.Euler(orbitAngles);
 	}
 
 	private void LateUpdate()
 	{
+		// Synchronize the alignment with the current up direction
+		// Utilize FromToRotation to minimize erratic rotations
+		gravityAlignment =
+			Quaternion.FromToRotation(
+				gravityAlignment * Vector3.up, CustomGravity.GetUpAxis(focusPoint)
+				) * gravityAlignment;
 		UpdateFocusPoint();
-		Quaternion lookRotation;
 
 		if (ManualRotation() || AutomaticRotation())
 		{
 			ConstrainAngles();
-			lookRotation = Quaternion.Euler(orbitAngles);
+			orbitRotation = Quaternion.Euler(orbitAngles);
 		}
-		else
-		{
-			lookRotation = transform.localRotation;
-		}
+
+		Quaternion lookRotation = gravityAlignment * orbitRotation;
 
 		// Skew the look direction by the look rotation
 		Vector3 lookDirection = lookRotation * Vector3.forward;
@@ -174,9 +183,13 @@ public class OrbitCamera : MonoBehaviour
 			return false;
 		}
 
+		Vector3 alignedDelta =
+			Quaternion.Inverse(gravityAlignment) *
+			(focusPoint - previousFocusPoint);
+
 		Vector2 movement = new Vector2(
-			focusPoint.x - previousFocusPoint.x,
-			focusPoint.z - previousFocusPoint.z
+			alignedDelta.x,
+			alignedDelta.y
 			);
 		float movementDeltaSqr = movement.sqrMagnitude;
 		if (movementDeltaSqr < 0.0001f)
