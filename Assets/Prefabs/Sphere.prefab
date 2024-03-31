@@ -265,4 +265,5 @@ MonoBehaviour:
     m_Bits: 51
   stairsMask:
     serializedVersion: 2
-    m_Bits: 256
+    m_Bits: 1024
+  playerInputSpace: {fileID: 0}
