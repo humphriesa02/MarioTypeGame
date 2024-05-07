@@ -117,4 +117,4 @@ MonoBehaviour:
   upAlignmentSpeed: 360
   obstructionMask:
     serializedVersion: 2
-    m_Bits: 1205
+    m_Bits: 3253
