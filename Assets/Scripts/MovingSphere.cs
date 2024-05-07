@@ -53,7 +53,7 @@ public class MovingSphere : MonoBehaviour
 	float minGroundDotProduct, minStairsDotProduct;
 
 	// Velocity and what we want velocity to be
-	Vector3 velocity, desiredVelocity;
+	Vector3 velocity, desiredVelocity, connectionVelocity;
 
 	// Are we trying to jump?
 	bool desiredJump;
@@ -81,10 +81,13 @@ public class MovingSphere : MonoBehaviour
 	// How many frames
 	int stepsSinceLastJump = 0;
 
-	Rigidbody body;
+	Rigidbody body, connectedBody, previousConnectedBody;
 
 	// overriding Unity's built in axises for custom gravity
 	Vector3 upAxis, rightAxis, forwardAxis;
+
+	// World position of the body that we are connected to
+	Vector3 connectionWorldPosition, connectionLocalPosition;
 	
 	private void OnValidate()
 	{
@@ -165,9 +168,11 @@ public class MovingSphere : MonoBehaviour
 		Vector3 xAxis = ProjectDirectionOnPlane(rightAxis, contactNormal);
 		Vector3 zAxis = ProjectDirectionOnPlane(forwardAxis, contactNormal);
 
+		// Allows for velocity relative to a moving platform
+		Vector3 relativeVelocity = velocity - connectionVelocity;
 		// project the current velocity on both vectors to get the relative X and Z speeds.
-		float currentX = Vector3.Dot(velocity, xAxis);
-		float currentZ = Vector3.Dot(velocity, zAxis);
+		float currentX = Vector3.Dot(relativeVelocity, xAxis);
+		float currentZ = Vector3.Dot(relativeVelocity, zAxis);
 
 		// Acceleration speed dependent on if we are on the ground
 		float acceleration = OnGround ? maxAcceleration : maxAirAcceleration;
@@ -200,7 +205,9 @@ public class MovingSphere : MonoBehaviour
 	void ClearState()
 	{
 		groundContactCount = steepContactCount =  0;
-		contactNormal = steepNormal = Vector3.zero;
+		contactNormal = steepNormal = connectionVelocity = Vector3.zero;
+		previousConnectedBody = connectedBody;
+		connectedBody = null;
 	}
 
 	void UpdateState()
@@ -224,6 +231,27 @@ public class MovingSphere : MonoBehaviour
 		{
 			contactNormal = upAxis;
 		}
+
+		if (connectedBody)
+		{
+			if (connectedBody.isKinematic || connectedBody.mass >= body.mass)
+			{
+				UpdateConnectionState();
+			}
+		}
+	}
+
+	void UpdateConnectionState()
+	{
+		if (connectedBody == previousConnectedBody)
+		{
+			Vector3 connectionMovement =
+			 connectedBody.transform.TransformPoint(connectionLocalPosition) - 
+			 connectionWorldPosition;
+			connectionVelocity = connectionMovement / Time.deltaTime;
+		}
+		connectionWorldPosition = body.position;
+		connectionLocalPosition = connectedBody.transform.InverseTransformPoint(connectionWorldPosition);
 	}
 
 	void Jump(Vector3 gravity)
@@ -284,11 +312,16 @@ public class MovingSphere : MonoBehaviour
 			{
 				groundContactCount += 1;
 				contactNormal += normal;
+				connectedBody = collision.rigidbody;
 			}
 			else if (upDot > -0.01f)
 			{
 				steepContactCount += 1;
 				steepNormal += normal;
+				if (groundContactCount == 0)
+				{
+					connectedBody = collision.rigidbody;
+				}
 			}
 		}
 	}
@@ -328,6 +361,7 @@ public class MovingSphere : MonoBehaviour
 		{
 			velocity = (velocity - hit.normal * dot).normalized * speed;
 		}
+		connectedBody = hit.rigidbody;
 		return true;
 	}
 

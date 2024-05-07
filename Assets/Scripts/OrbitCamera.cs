@@ -27,6 +27,9 @@ public class OrbitCamera : MonoBehaviour
 	[SerializeField, Range(0f, 90f), Tooltip("Angle at which we scale to full speed camera alignment.")]
 	float alignSmoothRange = 45f;
 
+	[SerializeField, Min(0f)]
+	float upAlignmentSpeed = 360f;
+
 	[SerializeField, Tooltip("Layer mask ignored by the camera")]
 	LayerMask obstructionMask = -1;
 
@@ -87,10 +90,8 @@ public class OrbitCamera : MonoBehaviour
 	{
 		// Synchronize the alignment with the current up direction
 		// Utilize FromToRotation to minimize erratic rotations
-		gravityAlignment =
-			Quaternion.FromToRotation(
-				gravityAlignment * Vector3.up, CustomGravity.GetUpAxis(focusPoint)
-				) * gravityAlignment;
+
+		UpdateGravityAlignment();
 		UpdateFocusPoint();
 
 		if (ManualRotation() || AutomaticRotation())
@@ -124,6 +125,31 @@ public class OrbitCamera : MonoBehaviour
 		transform.SetPositionAndRotation(lookPosition, lookRotation);
 	}
 
+	void UpdateGravityAlignment()
+	{
+		Vector3 fromUp = gravityAlignment * Vector3.up; // Current up vector
+		Vector3 toUp = CustomGravity.GetUpAxis(focusPoint); // Desired up vector
+		float dot = Mathf.Clamp(Vector3.Dot(fromUp, toUp), -1f, 1f);
+		float angle = Mathf.Acos(dot) * Mathf.Rad2Deg; // Angle between current and desired
+		float maxAngle = upAlignmentSpeed * Time.deltaTime; // Maximum allowed angle 
+
+		Quaternion newAlignment =
+			Quaternion.FromToRotation(fromUp, toUp) * gravityAlignment;
+
+		// If angle from current to desired doesn't exceed max given angle
+		if (angle <= maxAngle) 
+		{
+			// Set gravity alignment
+			gravityAlignment = newAlignment;
+		}
+		else
+		{
+			// Else lerp the gravity alignment by maxangle/angle
+			gravityAlignment = Quaternion.SlerpUnclamped(
+				gravityAlignment, newAlignment, maxAngle / angle
+				);
+		}
+	}
 	void UpdateFocusPoint()
 	{
 		previousFocusPoint = focusPoint;

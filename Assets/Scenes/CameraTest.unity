@@ -347,6 +347,10 @@ MonoBehaviour:
   maxVerticalAngle: 60
   alignDelay: 0
   alignSmoothRange: 45
+  upAlignmentSpeed: 360
+  obstructionMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
 --- !u!1 &1631004142
 GameObject:
   m_ObjectHideFlags: 0
@@ -514,6 +518,7 @@ GameObject:
   - component: {fileID: 2147389348}
   - component: {fileID: 2147389347}
   - component: {fileID: 2147389346}
+  - component: {fileID: 2147389350}
   m_Layer: 0
   m_Name: Ground
   m_TagString: Untagged
@@ -608,6 +613,21 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2147389350
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2147389345}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 33534c9cc7c943647832ee5e691b9418, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  gravity: 9.81
+  range: 8
+  debugSize: {x: 10, y: 0, z: 10}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
