@@ -1,10 +1,13 @@
 using UnityEngine;
 
 [RequireComponent (typeof(Rigidbody))]
-public class CustomGravityRigidbody : MonoBehaviour
+public class StableFloatingRigidbody : MonoBehaviour
 {
 	[SerializeField, Tooltip("Whether a body is allowed to float so it can go to sleep.")]
 	bool floatToSleep = false;
+
+	[SerializeField, Tooltip("Enable to have extra queries performed to ensure large objects pushed out of the water don't levitate. Use on large light objects.")]
+	bool safeFloating = false;
 
 	[Header("Water Interaction")]
 	[SerializeField, Tooltip("Offset from the center of the object, dedicating a point to measure range.")]
@@ -17,8 +20,8 @@ public class CustomGravityRigidbody : MonoBehaviour
 		" anything greater than 1 will float to the surface. A buoyancy of 2 would mean it rises as fast as it would normally fall.")]
 	float buoyancy = 1f;
 
-	[SerializeField, Tooltip("Objects often float with their lightest side up. We simulate this by adding a offset vector to apply buoyancy to.")]
-	Vector3 buoyancyOffset = Vector3.zero;
+	[SerializeField, Tooltip("Objects often float with their lightest side up. We simulate this by adding a series of offset vectors to apply buoyancy to.")]
+	Vector3[] buoyancyOffsets = default;
 
 	[SerializeField, Range(0f, 10f), Tooltip("Drag placed on the object while in water.")]
 	float waterDrag = 1f;
@@ -26,7 +29,7 @@ public class CustomGravityRigidbody : MonoBehaviour
 	[SerializeField, Tooltip("Used to determine if object is in water. Assign to water layer.")]
 	LayerMask waterMask = 0;
 
-	float submergence;
+	float[] submergence;
 
 	Vector3 gravity;
 
@@ -39,6 +42,7 @@ public class CustomGravityRigidbody : MonoBehaviour
 	{
 		body = GetComponent<Rigidbody>();
 		body.useGravity = false;
+		submergence = new float[buoyancyOffsets.Length];
 	}
 
 	private void FixedUpdate()
@@ -65,17 +69,22 @@ public class CustomGravityRigidbody : MonoBehaviour
 		}
 
 		gravity = CustomGravity.GetGravity(body.position);
-		if (submergence > 0f)
+		float dragFactor = waterDrag * Time.deltaTime / buoyancyOffsets.Length;
+		float buoyancyFactor = -buoyancy / buoyancyOffsets.Length;
+		for (int i = 0; i < buoyancyOffsets.Length; i++)
 		{
-			float drag = Mathf.Max(0f, 1f - waterDrag * submergence * Time.deltaTime);
-			body.velocity *= drag;
-			body.angularVelocity *= drag;
-			body.AddForceAtPosition(
-				gravity * -(buoyancy * submergence),
-				transform.TransformPoint(buoyancyOffset),
-				ForceMode.Acceleration
-				);
-			submergence = 0f;
+			if (submergence[i] > 0f)
+			{
+				float drag = Mathf.Max(0f, 1f - dragFactor * submergence[i]);
+				body.velocity *= drag;
+				body.angularVelocity *= drag;
+				body.AddForceAtPosition(
+					gravity * (buoyancyFactor * submergence[i]),
+					transform.TransformPoint(buoyancyOffsets[i]),
+					ForceMode.Acceleration
+					);
+				submergence[i] = 0f;
+			}
 		}
 
 		body.AddForce(gravity, ForceMode.Acceleration);
@@ -101,20 +110,29 @@ public class CustomGravityRigidbody : MonoBehaviour
 
 	void EvaluateSubmergence(Collider collider)
 	{
-		Vector3 upAxis = -gravity.normalized;
-		// Shoot a raycast from the top of the sphere downwards,
-		// ending at the submergence offset.
-		if (Physics.Raycast(
-			body.position + upAxis * submergenceOffset,
-			-upAxis, out RaycastHit hit, submergenceRange + 1f,
-			waterMask, QueryTriggerInteraction.Collide
-			))
+		Vector3 down = gravity.normalized;
+		Vector3 offset = down * -submergenceOffset;
+
+		for (int i = 0; i < buoyancyOffsets.Length; i++)
 		{
-			submergence = 1f - hit.distance / submergenceRange;
-		}
-		else
-		{
-			submergence = 1f;
+			Vector3 p = offset + transform.TransformPoint(buoyancyOffsets[i]);
+			// Shoot a raycast from the top of the buoyancy offset downwards,
+			// ending at the submergence offset.
+			if (Physics.Raycast(
+				p, down, out RaycastHit hit, submergenceRange + 1f,
+				waterMask, QueryTriggerInteraction.Collide
+				))
+			{
+				submergence[i] = 1f - hit.distance / submergenceRange;
+			}
+			else if (
+				!safeFloating || Physics.CheckSphere(
+					p, 0.01f, waterMask, QueryTriggerInteraction.Collide
+				)
+			)
+			{
+				submergence[i] = 1f;
+			}
 		}
 	}
 }
