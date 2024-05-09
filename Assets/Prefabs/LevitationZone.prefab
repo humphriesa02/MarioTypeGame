@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 6841260633839075799}
   - component: {fileID: 3679978198108751773}
   - component: {fileID: 2990813831000974475}
-  m_Layer: 0
+  m_Layer: 12
   m_Name: LevitationZone
   m_TagString: Untagged
   m_Icon: {fileID: 0}
