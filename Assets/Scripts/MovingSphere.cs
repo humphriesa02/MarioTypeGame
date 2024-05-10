@@ -87,6 +87,9 @@ public class MovingSphere : MonoBehaviour
 	[SerializeField, Tooltip("Custom space to define player input")]
 	Transform playerInputSpace = default;
 
+	[SerializeField, Tooltip("Transform representing the player's visual. For now it is a sphere mesh.")]
+	Transform playerVisual = default;
+
 	[SerializeField, Tooltip("The 'normal' material of the sphere, changes depending on the state of the sphere. Will be changed to anims.")]
 	Material normalMaterial = default;
 
@@ -96,6 +99,15 @@ public class MovingSphere : MonoBehaviour
 	[SerializeField, Tooltip("The swimming material of the sphere, changes when the sphere is swimming. Will be changed to anims.")]
 	Material swimmingMaterial = default;
 
+	[Header("Rolling")] // May get removed... TBD
+	[SerializeField, Min(0.1f), Tooltip("Radius of the ball, depending on the sphere's size.")]
+	float ballRadius = 0.5f;
+
+	[SerializeField, Min(0f), Tooltip("How quickly the ball aligns to its forward vector when rolling.")]
+	float ballAlignSpeed = 180f;
+
+	[SerializeField, Min(0f), Tooltip("Rotation speeds for non ground movement.")]
+	float ballAirRotation = 0.5f, ballSwimRotation = 2f;
 
 	// TODO replace with animations
 	MeshRenderer meshRenderer;
@@ -158,6 +170,13 @@ public class MovingSphere : MonoBehaviour
 
 	// World position of the body that we are connected to
 	Vector3 connectionWorldPosition, connectionLocalPosition;
+
+	// Used for rotation, since contact normal gets cleared each physics step.
+	Vector3 lastContactNormal;
+	// Same as contact normal but for slopes and walls.
+	Vector3 lastSteepNormal;
+	// Accounts for surface motion of connected body.
+	Vector3 lastConnectionVelocity;
 	
 	private void OnValidate()
 	{
@@ -171,7 +190,7 @@ public class MovingSphere : MonoBehaviour
 	{
 		body = GetComponent<Rigidbody>();
 		body.useGravity = false;
-		meshRenderer = GetComponent<MeshRenderer>();
+		meshRenderer = playerVisual.GetComponent<MeshRenderer>();
 		OnValidate();
 	}
 
@@ -179,8 +198,8 @@ public class MovingSphere : MonoBehaviour
 	{
 		// Input gathering
 		playerInput.x = Input.GetAxis("Horizontal");
-		playerInput.y = Input.GetAxis("Vertical");
-		playerInput.z = Swimming ? Input.GetAxis("UpDown") : 0f;
+		playerInput.z = Input.GetAxis("Vertical");
+		playerInput.y = Swimming ? Input.GetAxis("UpDown") : 0f;
 		// Clamp input so diagonals aren't faster
 		playerInput = Vector3.ClampMagnitude(playerInput, 1f);
 
@@ -211,9 +230,98 @@ public class MovingSphere : MonoBehaviour
 			desiredJump |= Input.GetButtonDown("Jump");
 			desiresClimbing = Input.GetButton("Climb");
 		}
-		
-		meshRenderer.material = Climbing ? climbingMaterial :
-			Swimming ? swimmingMaterial : normalMaterial;
+		UpdateVisual();
+	}
+
+	void UpdateVisual()
+	{
+		// Material changing
+		Material ballMaterial = normalMaterial;
+
+		Vector3 rotationPlaneNormal = lastContactNormal;
+		float rotationFactor = 1f;
+		if (Climbing)
+		{
+			ballMaterial = climbingMaterial;
+		}
+		else if (Swimming)
+		{
+			ballMaterial = swimmingMaterial;
+			rotationFactor = ballSwimRotation;
+		}
+		else if (!OnGround)
+		{
+			if (OnSteep)
+			{
+				rotationPlaneNormal = lastSteepNormal;
+			}
+			else
+			{
+				rotationFactor = ballAirRotation;
+			}
+		}
+		meshRenderer.material = ballMaterial;
+
+		// Rotation
+		Vector3 movement = 
+			(body.velocity - lastConnectionVelocity) * Time.deltaTime;
+		movement -=
+			rotationPlaneNormal * Vector3.Dot(movement, rotationPlaneNormal);
+
+		float distance = movement.magnitude;
+
+		Quaternion rotation = playerVisual.localRotation;
+		if (connectedBody && connectedBody == previousConnectedBody)
+		{
+			rotation = Quaternion.Euler(
+				connectedBody.angularVelocity * (Mathf.Rad2Deg * Time.deltaTime)
+				) * rotation;
+			print(connectedBody.angularVelocity);
+			if (distance < 0.001f)
+			{
+				playerVisual.localRotation = rotation;
+				return;
+			}
+		}
+		else if (distance < 0.001f) return;
+
+		float angle = distance * rotationFactor * (180f / Mathf.PI) / ballRadius;
+
+		// finding rotation relative to contact normal
+		Vector3 rotationAxis =
+			Vector3.Cross(rotationPlaneNormal, movement).normalized;
+		rotation =
+			Quaternion.Euler(rotationAxis * angle) * rotation;
+
+		if (ballAlignSpeed > 0f)
+		{
+			rotation = AlignBallRotation(rotationAxis, rotation, distance);
+		}
+
+		playerVisual.localRotation = rotation;
+	}
+
+	Quaternion AlignBallRotation(Vector3 rotationAxis, Quaternion rotation, float traveledDistance)
+	{
+		Vector3 playerAxis = playerVisual.up;
+		float dot = Mathf.Clamp(Vector3.Dot(playerAxis, rotationAxis), -1f, 1f);
+		float angle = Mathf.Acos(dot) * Mathf.Rad2Deg; // Angle between current and desired
+		float maxAngle = ballAlignSpeed * traveledDistance; // Maximum allowed angle 
+
+		Quaternion newAlignment =
+			Quaternion.FromToRotation(playerAxis, rotationAxis) * rotation;
+
+		// If angle from current to desired doesn't exceed max given angle
+		if (angle <= maxAngle)
+		{
+			return newAlignment;
+		}
+		else
+		{
+			return Quaternion.SlerpUnclamped(
+				rotation, newAlignment, maxAngle / angle
+				);
+		}
 	}
 
 	private void FixedUpdate()
@@ -312,27 +420,27 @@ public class MovingSphere : MonoBehaviour
 
 		// Allows for velocity relative to a moving platform
 		Vector3 relativeVelocity = velocity - connectionVelocity;
-		// project the current velocity on both vectors to get the relative X and Z speeds.
-		float currentX = Vector3.Dot(relativeVelocity, xAxis);
-		float currentZ = Vector3.Dot(relativeVelocity, zAxis);
 
-		// Apply delta time to acceleration for speed change
-		float maxSpeedChange = acceleration * Time.deltaTime;
+		// Directly calculate desired velocity adjustment along X and Z axis
+		Vector3 adjustment;
+		adjustment.x =
+			playerInput.x * speed - Vector3.Dot(relativeVelocity, xAxis);
+		adjustment.z =
+			playerInput.z * speed - Vector3.Dot(relativeVelocity, zAxis);
+		adjustment.y = Swimming ?
+			playerInput.y * speed - Vector3.Dot(relativeVelocity, upAxis) : 0f;
 
-		// Move from the current x and z speeds to the desired speeds using speed change
-		float newX = Mathf.MoveTowards(currentX, playerInput.x * speed, maxSpeedChange);
-		float newZ = Mathf.MoveTowards(currentZ, playerInput.y * speed, maxSpeedChange);
+		// Clamp the adjustment vector by maximum speed change. This applies
+		// acceleration once and removes bias.
+		adjustment =
+			Vector3.ClampMagnitude(adjustment, acceleration * Time.deltaTime);
 
 		// Fancy velocity calculation
-		velocity += xAxis * (newX - currentX) + zAxis * (newZ - currentZ);
+		velocity += xAxis * adjustment.x + zAxis * adjustment.z;
 
 		if (Swimming)
 		{
-			float currentY = Vector3.Dot(relativeVelocity, upAxis);
-			float newY = Mathf.MoveTowards(
-				currentY, playerInput.z * speed, maxSpeedChange
-				);
-			velocity += upAxis * (newY - currentY);
+			velocity += upAxis * adjustment.y;
 		}
 	}
 
@@ -352,6 +460,9 @@ public class MovingSphere : MonoBehaviour
 	// Clears collision data
 	void ClearState()
 	{
+		lastContactNormal = contactNormal;
+		lastSteepNormal = steepNormal;
+		lastConnectionVelocity = connectionVelocity;
 		groundContactCount = steepContactCount = climbContactCount =  0;
 		contactNormal = steepNormal = climbNormal = Vector3.zero;
 		connectionVelocity = Vector3.zero;
